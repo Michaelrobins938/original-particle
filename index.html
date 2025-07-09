@@ -34,6 +34,7 @@
             border: 1px solid #333;
             backdrop-filter: blur(15px);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            max-width: 320px;
         }
         
         .control-group {
@@ -56,8 +57,9 @@
             border: 2px solid #00FFFF;
             padding: 10px;
             border-radius: 8px;
-            width: 280px;
+            width: 100%;
             transition: all 0.3s ease;
+            cursor: pointer;
         }
         
         input[type="file"]:hover {
@@ -65,11 +67,17 @@
             box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
         }
         
+        input[type="file"]:focus {
+            outline: none;
+            border-color: #FF0055;
+            box-shadow: 0 0 20px rgba(255, 0, 85, 0.4);
+        }
+        
         button {
             background: linear-gradient(135deg, #00FFFF, #FF0055);
             border: none;
             color: #000;
-            padding: 12px 24px;
+            padding: 12px 20px;
             border-radius: 8px;
             cursor: pointer;
             margin: 5px 5px 5px 0;
@@ -78,12 +86,17 @@
             letter-spacing: 1px;
             transition: all 0.3s ease;
             box-shadow: 0 4px 15px rgba(0, 255, 255, 0.3);
+            font-size: 10px;
         }
         
-        button:hover {
+        button:hover:not(:disabled) {
             transform: translateY(-3px);
             box-shadow: 0 8px 25px rgba(255, 0, 85, 0.4);
             background: linear-gradient(135deg, #FF0055, #FF6600);
+        }
+        
+        button:active:not(:disabled) {
+            transform: translateY(-1px);
         }
         
         button:disabled {
@@ -91,6 +104,7 @@
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
+            background: #333;
         }
         
         #info {
@@ -109,6 +123,18 @@
             border-radius: 8px;
             border: 1px solid #00FF66;
             display: none;
+        }
+        
+        #audioTitle {
+            font-weight: bold;
+            margin-bottom: 5px;
+            word-break: break-all;
+        }
+        
+        #audioTime {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            opacity: 0.8;
         }
         
         #loading {
@@ -138,20 +164,84 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        
+        .error-message {
+            color: #ff4444;
+            background: rgba(255, 68, 68, 0.1);
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 11px;
+            display: none;
+            border: 1px solid #ff4444;
+            word-wrap: break-word;
+        }
+        
+        .success-message {
+            color: #00ff44;
+            background: rgba(0, 255, 68, 0.1);
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 11px;
+            display: none;
+            border: 1px solid #00ff44;
+        }
+        
+        .drop-zone {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 255, 255, 0.1);
+            border: 3px dashed #00FFFF;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 150;
+            font-size: 24px;
+            color: #00FFFF;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .drop-zone.active {
+            display: flex;
+        }
+        
+        @media (max-width: 480px) {
+            #controls {
+                top: 10px;
+                right: 10px;
+                left: 10px;
+                max-width: none;
+                padding: 15px;
+            }
+            
+            button {
+                width: 100%;
+                margin: 5px 0;
+            }
+        }
     </style>
 </head>
 <body>
     <div id="container">
+        <div class="drop-zone" id="dropZone">
+            Drop Your Audiobook Here
+        </div>
+        
         <div id="controls">
             <div class="control-group">
-                <label for="audioFile">Audiobook File</label>
+                <label for="audioFile">📚 Audiobook File</label>
                 <input type="file" id="audioFile" accept="audio/*,video/*">
             </div>
             
             <div class="control-group">
-                <button id="playBtn" disabled>Play</button>
-                <button id="pauseBtn" disabled>Pause</button>
-                <button id="exportBtn" disabled>Export</button>
+                <button id="playBtn" disabled>▶ Play</button>
+                <button id="pauseBtn" disabled>⏸ Pause</button>
+                <button id="exportBtn" disabled>🎬 Export</button>
             </div>
             
             <div id="audioInfo">
@@ -159,14 +249,19 @@
                 <div id="audioTime">00:00 / 00:00</div>
             </div>
             
+            <div class="error-message" id="errorMessage"></div>
+            <div class="success-message" id="successMessage"></div>
+            
             <div id="info">
-                🎧 Load your audiobook file<br>
+                🎧 <strong>Load your audiobook file</strong><br>
                 🔮 Highly reactive narrator orb<br>
-                📹 Export for video editing<br>
+                📹 Export cinematic video<br>
                 <br>
                 <strong>Hotkeys:</strong><br>
-                Space: Play/Pause<br>
-                E: Export Video
+                <kbd>Space</kbd> Play/Pause<br>
+                <kbd>E</kbd> Export Video<br>
+                <br>
+                <em>Supports: MP3, WAV, MP4, M4A</em>
             </div>
         </div>
         
@@ -176,7 +271,21 @@
         </div>
     </div>
 
+    <!-- Load Three.js from a reliable CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Ensure Three.js loaded properly
+        if (typeof THREE === 'undefined') {
+            console.error('Three.js failed to load');
+            const errorEl = document.getElementById('errorMessage');
+            if (errorEl) {
+                errorEl.style.display = 'block';
+                errorEl.textContent = 'Failed to load 3D graphics library. Please check your internet connection and refresh the page.';
+            }
+        } else {
+            console.log('✅ Three.js loaded successfully');
+        }
+    </script>
     <script src="main.js"></script>
 </body>
 </html>
