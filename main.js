@@ -1,9 +1,14 @@
 class AudiobookNarratorOrb {
     constructor() {
+        // Check if Three.js is available
+        if (typeof THREE === 'undefined') {
+            this.showError('Three.js library failed to load. Please refresh the page.');
+            return;
+        }
+
         this.scene = null;
         this.camera = null;
         this.renderer = null;
-        this.composer = null;
         
         // Audio system
         this.audioElement = null;
@@ -51,10 +56,55 @@ class AudiobookNarratorOrb {
         this.isPlaying = false;
         this.mediaRecorder = null;
         this.recordedChunks = [];
+        this.isInitialized = false;
         
-        this.init();
-        this.setupEventListeners();
-        this.animate();
+        try {
+            this.init();
+            this.setupEventListeners();
+            this.animate();
+            this.isInitialized = true;
+            console.log('✅ Audiobook Narrator Orb initialized successfully');
+        } catch (error) {
+            console.error('Initialization error:', error);
+            this.showError('Failed to initialize 3D graphics. Please check your browser compatibility.');
+        }
+    }
+    
+    showError(message) {
+        const errorElement = document.getElementById('errorMessage');
+        if (errorElement) {
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+        }
+        console.error(message);
+        
+        // Hide success message if showing
+        const successElement = document.getElementById('successMessage');
+        if (successElement) {
+            successElement.style.display = 'none';
+        }
+    }
+    
+    showSuccess(message) {
+        const successElement = document.getElementById('successMessage');
+        if (successElement) {
+            successElement.textContent = message;
+            successElement.style.display = 'block';
+        }
+        console.log(message);
+        
+        // Hide error message if showing
+        const errorElement = document.getElementById('errorMessage');
+        if (errorElement) {
+            errorElement.style.display = 'none';
+        }
+        
+        // Auto-hide success message after 3 seconds
+        setTimeout(() => {
+            if (successElement) {
+                successElement.style.display = 'none';
+            }
+        }, 3000);
     }
     
     init() {
@@ -67,17 +117,38 @@ class AudiobookNarratorOrb {
         this.camera.position.set(0, 1, 8);
         this.camera.lookAt(0, 0, 0);
         
-        // High-quality renderer
-        this.renderer = new THREE.WebGLRenderer({
-            antialias: true,
-            preserveDrawingBuffer: true,
-            powerPreference: "high-performance"
-        });
+        // High-quality renderer with better error handling
+        try {
+            this.renderer = new THREE.WebGLRenderer({
+                antialias: true,
+                preserveDrawingBuffer: true,
+                powerPreference: "high-performance"
+            });
+        } catch (error) {
+            console.warn('High-performance WebGL failed, falling back to default:', error);
+            try {
+                this.renderer = new THREE.WebGLRenderer({
+                    antialias: true,
+                    preserveDrawingBuffer: true
+                });
+            } catch (fallbackError) {
+                console.error('WebGL initialization failed:', fallbackError);
+                throw new Error('WebGL is not supported on this device');
+            }
+        }
+        
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        this.renderer.outputEncoding = THREE.sRGBEncoding;
-        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.2;
+        
+        // Check for WebGL2 support and set encoding accordingly
+        if (this.renderer.capabilities.isWebGL2) {
+            this.renderer.outputEncoding = THREE.sRGBEncoding;
+            this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            this.renderer.toneMappingExposure = 1.2;
+        } else {
+            console.warn('WebGL2 not available, using basic rendering');
+        }
+        
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         
@@ -87,8 +158,6 @@ class AudiobookNarratorOrb {
         this.createStarField();
         this.createNarratorOrb();
         this.createReflectionSystem();
-        
-        console.log('Audiobook Narrator Orb initialized');
     }
     
     setupLighting() {
@@ -96,6 +165,8 @@ class AudiobookNarratorOrb {
         this.lights.keyLight = new THREE.PointLight(this.neonColors.electricBlue, 2, 20);
         this.lights.keyLight.position.set(4, 4, 4);
         this.lights.keyLight.castShadow = true;
+        this.lights.keyLight.shadow.mapSize.width = 1024;
+        this.lights.keyLight.shadow.mapSize.height = 1024;
         this.scene.add(this.lights.keyLight);
         
         // Fill light (Scorched Pink)
@@ -411,15 +482,34 @@ class AudiobookNarratorOrb {
         
         // Keyboard controls
         document.addEventListener('keydown', (e) => {
-            if (e.code === 'Space') { e.preventDefault(); this.togglePlayPause(); }
-            if (e.code === 'KeyE') { e.preventDefault(); this.exportVideo(); }
+            if (e.code === 'Space') { 
+                e.preventDefault(); 
+                this.togglePlayPause(); 
+            }
+            if (e.code === 'KeyE') { 
+                e.preventDefault(); 
+                this.exportVideo(); 
+            }
         });
         
-        // Drag & drop
+        // Enhanced drag & drop
         const container = document.getElementById('container');
-        container.addEventListener('dragover', (e) => { e.preventDefault(); });
+        const dropZone = document.getElementById('dropZone');
+        
+        container.addEventListener('dragover', (e) => { 
+            e.preventDefault(); 
+            dropZone.classList.add('active');
+        });
+        
+        container.addEventListener('dragleave', (e) => {
+            if (!container.contains(e.relatedTarget)) {
+                dropZone.classList.remove('active');
+            }
+        });
+        
         container.addEventListener('drop', (e) => {
             e.preventDefault();
+            dropZone.classList.remove('active');
             const files = e.dataTransfer.files;
             if (files.length > 0) this.loadAudioFile(files[0]);
         });
@@ -434,6 +524,12 @@ class AudiobookNarratorOrb {
         try {
             console.log('Loading audiobook:', file.name);
             
+            // Validate file type
+            const validTypes = ['audio/', 'video/'];
+            if (!validTypes.some(type => file.type.startsWith(type))) {
+                throw new Error('Please select an audio or video file');
+            }
+            
             this.audioElement = new Audio();
             this.audioElement.crossOrigin = 'anonymous';
             
@@ -442,13 +538,19 @@ class AudiobookNarratorOrb {
             
             await new Promise((resolve, reject) => {
                 this.audioElement.addEventListener('loadeddata', resolve);
-                this.audioElement.addEventListener('error', reject);
+                this.audioElement.addEventListener('error', (e) => {
+                    reject(new Error('Failed to load audio file'));
+                });
                 this.audioElement.load();
             });
             
             // Setup enhanced audio analysis for speech
             if (!this.audioContext) {
                 this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            if (this.audioContext.state === 'suspended') {
+                await this.audioContext.resume();
             }
             
             if (this.source) this.source.disconnect();
@@ -470,23 +572,35 @@ class AudiobookNarratorOrb {
             document.getElementById('pauseBtn').disabled = false;
             document.getElementById('exportBtn').disabled = false;
             
+            // Show success message
+            this.showSuccess(`✅ Audiobook "${file.name}" loaded successfully!`);
+            
             console.log('✅ Audiobook loaded and ready for narration!');
+            
+            // Clean up object URL
+            URL.revokeObjectURL(url);
             
         } catch (error) {
             console.error('Error loading audiobook:', error);
-            alert('Error loading audiobook. Please try MP3, WAV, or MP4 format.');
+            this.showError(`Error loading audiobook: ${error.message}`);
         } finally {
             this.showLoading(false);
         }
     }
     
-    playAudio() {
+    async playAudio() {
         if (this.audioElement && this.audioContext) {
-            if (this.audioContext.state === 'suspended') {
-                this.audioContext.resume();
+            try {
+                if (this.audioContext.state === 'suspended') {
+                    await this.audioContext.resume();
+                }
+                await this.audioElement.play();
+                this.isPlaying = true;
+                this.showSuccess('🎵 Playback started');
+            } catch (error) {
+                console.error('Audio play error:', error);
+                this.showError('Failed to play audio. Please try again.');
             }
-            this.audioElement.play();
-            this.isPlaying = true;
         }
     }
     
@@ -494,29 +608,45 @@ class AudiobookNarratorOrb {
         if (this.audioElement) {
             this.audioElement.pause();
             this.isPlaying = false;
+            this.showSuccess('⏸ Playback paused');
         }
     }
     
     togglePlayPause() {
-        if (this.isPlaying) this.pauseAudio();
-        else this.playAudio();
+        if (this.isPlaying) {
+            this.pauseAudio();
+        } else {
+            this.playAudio();
+        }
     }
     
     async exportVideo() {
         if (!this.audioElement) {
-            alert('Please load an audiobook file first');
+            this.showError('Please load an audiobook file first');
             return;
         }
         
         const exportBtn = document.getElementById('exportBtn');
         exportBtn.disabled = true;
-        exportBtn.textContent = 'Recording...';
+        exportBtn.textContent = '🎬 Recording...';
         
         try {
             this.audioElement.currentTime = 0;
             const duration = this.audioElement.duration;
             
-            // Ultra high-quality recording for cinematic output
+            // Check MediaRecorder support
+            let mimeType;
+            if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
+                mimeType = 'video/webm;codecs=vp9,opus';
+            } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
+                mimeType = 'video/webm;codecs=vp8,opus';
+            } else if (MediaRecorder.isTypeSupported('video/webm')) {
+                mimeType = 'video/webm';
+            } else {
+                throw new Error('Video recording not supported on this browser');
+            }
+            
+            // High-quality recording
             const canvasStream = this.renderer.domElement.captureStream(60);
             const audioDestination = this.audioContext.createMediaStreamDestination();
             this.source.connect(audioDestination);
@@ -527,9 +657,9 @@ class AudiobookNarratorOrb {
             ]);
             
             this.mediaRecorder = new MediaRecorder(combinedStream, {
-                mimeType: 'video/webm;codecs=vp9,opus',
-                videoBitsPerSecond: 15000000, // 15 Mbps for cinema quality
-                audioBitsPerSecond: 320000    // 320 kbps for audiobook quality
+                mimeType: mimeType,
+                videoBitsPerSecond: 8000000, // 8 Mbps for good quality
+                audioBitsPerSecond: 320000   // 320 kbps for audiobook quality
             });
             
             this.recordedChunks = [];
@@ -539,88 +669,113 @@ class AudiobookNarratorOrb {
             
             this.mediaRecorder.onstop = () => this.downloadVideo();
             
+            this.mediaRecorder.onerror = (e) => {
+                console.error('MediaRecorder error:', e);
+                this.showError('Recording failed: ' + e.error);
+                exportBtn.disabled = false;
+                exportBtn.textContent = '🎬 EXPORT';
+            };
+            
             this.mediaRecorder.start(100);
-            this.playAudio();
+            await this.playAudio();
+            
+            this.showSuccess(`🎬 Recording ${duration.toFixed(1)}s of cinematic narrator orb!`);
             
             setTimeout(() => {
-                this.mediaRecorder.stop();
+                if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+                    this.mediaRecorder.stop();
+                }
                 exportBtn.disabled = false;
-                exportBtn.textContent = 'EXPORT';
+                exportBtn.textContent = '🎬 EXPORT';
             }, (duration + 1) * 1000);
-            
-            alert(`🎬 Recording ${duration.toFixed(1)}s of cinematic narrator orb!\nCinema-quality export will download automatically.`);
             
         } catch (error) {
             console.error('Export error:', error);
-            alert('Export failed: ' + error.message);
+            this.showError(`Export failed: ${error.message}`);
             exportBtn.disabled = false;
-            exportBtn.textContent = 'EXPORT';
+            exportBtn.textContent = '🎬 EXPORT';
         }
     }
     
     downloadVideo() {
-        const blob = new Blob(this.recordedChunks, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        const timestamp = new Date().toISOString().slice(0,19).replace(/[:.]/g, '-');
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `audiobook-narrator-orb-${timestamp}.webm`;
-        a.click();
-        
-        URL.revokeObjectURL(url);
-        console.log('✅ Cinematic narrator orb exported!');
+        try {
+            const blob = new Blob(this.recordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            const timestamp = new Date().toISOString().slice(0,19).replace(/[:.]/g, '-');
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `audiobook-narrator-orb-${timestamp}.webm`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            URL.revokeObjectURL(url);
+            this.showSuccess('✅ Cinematic narrator orb exported successfully!');
+            console.log('✅ Cinematic narrator orb exported!');
+        } catch (error) {
+            console.error('Download error:', error);
+            this.showError('Failed to download video: ' + error.message);
+        }
     }
     
     updateAudioAnalysis() {
-        if (!this.analyser || !this.isPlaying) return;
+        if (!this.analyser || !this.isPlaying || !this.dataArray) return;
         
-        this.analyser.getByteFrequencyData(this.dataArray);
-        
-        // Enhanced amplitude calculation with speech focus
-        let sum = 0;
-        for (let i = 0; i < this.dataArray.length; i++) {
-            sum += this.dataArray[i];
-        }
-        const rawAmplitude = sum / this.dataArray.length / 255;
-        
-        // More responsive smoothing for speech dynamics
-        this.amplitude += (rawAmplitude - this.amplitude) * this.speechReactivity.responsiveness;
-        this.smoothedAmplitude += (this.amplitude - this.smoothedAmplitude) * this.speechReactivity.smoothing;
-        
-        // Enhanced frequency analysis for speech characteristics
-        const nyquist = this.audioContext.sampleRate / 2;
-        const binSize = nyquist / this.dataArray.length;
-        
-        const speechBands = {
-            subBass: [20, 60],
-            bass: [60, 250],
-            lowMid: [250, 500],   // Fundamental voice frequencies
-            mid: [500, 2000],     // Vowel formants
-            highMid: [2000, 4000], // Consonant clarity
-            presence: [4000, 6000], // Speech presence
-            brilliance: [6000, 20000] // Sibilance and air
-        };
-        
-        Object.keys(speechBands).forEach(band => {
-            const [minFreq, maxFreq] = speechBands[band];
-            const startBin = Math.floor(minFreq / binSize);
-            const endBin = Math.floor(maxFreq / binSize);
+        try {
+            this.analyser.getByteFrequencyData(this.dataArray);
             
-            let bandSum = 0;
-            for (let i = startBin; i < endBin; i++) {
-                bandSum += this.dataArray[i];
+            // Enhanced amplitude calculation with speech focus
+            let sum = 0;
+            for (let i = 0; i < this.dataArray.length; i++) {
+                sum += this.dataArray[i];
             }
+            const rawAmplitude = sum / this.dataArray.length / 255;
             
-            const rawValue = bandSum / (endBin - startBin) / 255;
+            // More responsive smoothing for speech dynamics
+            this.amplitude += (rawAmplitude - this.amplitude) * this.speechReactivity.responsiveness;
+            this.smoothedAmplitude += (this.amplitude - this.smoothedAmplitude) * this.speechReactivity.smoothing;
             
-            // Enhanced smoothing with speech-specific responsiveness
-            const responsiveness = band === 'mid' || band === 'highMid' ? 0.3 : 0.2;
-            this.voiceFrequencies[band] += (rawValue - this.voiceFrequencies[band]) * responsiveness;
-        });
+            // Enhanced frequency analysis for speech characteristics
+            const nyquist = this.audioContext.sampleRate / 2;
+            const binSize = nyquist / this.dataArray.length;
+            
+            const speechBands = {
+                subBass: [20, 60],
+                bass: [60, 250],
+                lowMid: [250, 500],   // Fundamental voice frequencies
+                mid: [500, 2000],     // Vowel formants
+                highMid: [2000, 4000], // Consonant clarity
+                presence: [4000, 6000], // Speech presence
+                brilliance: [6000, 20000] // Sibilance and air
+            };
+            
+            Object.keys(speechBands).forEach(band => {
+                const [minFreq, maxFreq] = speechBands[band];
+                const startBin = Math.floor(minFreq / binSize);
+                const endBin = Math.min(Math.floor(maxFreq / binSize), this.dataArray.length - 1);
+                
+                let bandSum = 0;
+                let binCount = 0;
+                for (let i = startBin; i <= endBin; i++) {
+                    bandSum += this.dataArray[i];
+                    binCount++;
+                }
+                
+                const rawValue = binCount > 0 ? bandSum / binCount / 255 : 0;
+                
+                // Enhanced smoothing with speech-specific responsiveness
+                const responsiveness = band === 'mid' || band === 'highMid' ? 0.3 : 0.2;
+                this.voiceFrequencies[band] += (rawValue - this.voiceFrequencies[band]) * responsiveness;
+            });
+        } catch (error) {
+            console.warn('Audio analysis error:', error);
+        }
     }
     
     updateVisuals() {
+        if (!this.isInitialized) return;
+        
         const time = this.clock.getElapsedTime();
         
         // Update narrator orb with enhanced speech reactivity
@@ -645,14 +800,23 @@ class AudiobookNarratorOrb {
         // Dynamic lighting based on speech
         const speechActivity = (this.voiceFrequencies.mid + this.voiceFrequencies.highMid + this.voiceFrequencies.presence) / 3;
         
-        this.lights.keyLight.intensity = 2 + speechActivity * 1.5;
-        this.lights.fillLight.intensity = 1.5 + this.voiceFrequencies.bass * 0.8;
-        this.lights.rimLight.intensity = 1 + this.voiceFrequencies.brilliance * 1.2;
+        if (this.lights.keyLight) {
+            this.lights.keyLight.intensity = 2 + speechActivity * 1.5;
+        }
+        if (this.lights.fillLight) {
+            this.lights.fillLight.intensity = 1.5 + this.voiceFrequencies.bass * 0.8;
+        }
+        if (this.lights.rimLight) {
+            this.lights.rimLight.intensity = 1 + this.voiceFrequencies.brilliance * 1.2;
+        }
         
         // Subtle rotation enhanced by speech activity
         const rotationSpeed = 0.003 * (1 + speechActivity * 0.7);
-        this.narratorOrb.rotation.y += rotationSpeed;
-        this.narratorOrb.rotation.x += rotationSpeed * 0.4;
+        
+        if (this.narratorOrb) {
+            this.narratorOrb.rotation.y += rotationSpeed;
+            this.narratorOrb.rotation.x += rotationSpeed * 0.4;
+        }
         
         if (this.reflectedOrb) {
             this.reflectedOrb.rotation.y += rotationSpeed;
@@ -667,6 +831,8 @@ class AudiobookNarratorOrb {
     }
     
     updateCamera() {
+        if (!this.isInitialized) return;
+        
         const time = this.clock.getElapsedTime();
         
         // Cinematic camera movement with speech responsiveness
@@ -692,33 +858,58 @@ class AudiobookNarratorOrb {
                 return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
             };
             
-            document.getElementById('audioTime').textContent = `${formatTime(current)} / ${formatTime(duration)}`;
+            const timeDisplay = document.getElementById('audioTime');
+            if (timeDisplay) {
+                timeDisplay.textContent = `${formatTime(current)} / ${formatTime(duration)}`;
+            }
         }
     }
     
     showLoading(show) {
-        document.getElementById('loading').style.display = show ? 'block' : 'none';
+        const loadingElement = document.getElementById('loading');
+        if (loadingElement) {
+            loadingElement.style.display = show ? 'block' : 'none';
+        }
     }
     
     onWindowResize() {
+        if (!this.camera || !this.renderer) return;
+        
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(window.innerWidth, window.innerHeight);
     }
     
     animate() {
+        if (!this.isInitialized) return;
+        
         requestAnimationFrame(() => this.animate());
         
-        this.updateAudioAnalysis();
-        this.updateVisuals();
-        this.updateCamera();
-        this.updateTimeDisplay();
-        
-        this.renderer.render(this.scene, this.camera);
+        try {
+            this.updateAudioAnalysis();
+            this.updateVisuals();
+            this.updateCamera();
+            this.updateTimeDisplay();
+            
+            if (this.renderer && this.scene && this.camera) {
+                this.renderer.render(this.scene, this.camera);
+            }
+        } catch (error) {
+            console.error('Animation loop error:', error);
+        }
     }
 }
 
-// Initialize the audiobook narrator orb
+// Initialize the audiobook narrator orb when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-    new AudiobookNarratorOrb();
+    try {
+        new AudiobookNarratorOrb();
+    } catch (error) {
+        console.error('Failed to initialize Audiobook Narrator Orb:', error);
+        const errorElement = document.getElementById('errorMessage');
+        if (errorElement) {
+            errorElement.style.display = 'block';
+            errorElement.textContent = 'Failed to initialize application. Please refresh the page and check browser compatibility.';
+        }
+    }
 });
